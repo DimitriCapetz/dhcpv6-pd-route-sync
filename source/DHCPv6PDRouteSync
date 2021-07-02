@@ -44,15 +44,12 @@ import sys
 import time
 import re
 from jsonrpclib import Server
-from subprocess import call, PIPE
 
 __author__ = 'robmartin, dcapetz'
 __version__ = '0.1.0'
 
 # Global variables - Credentials for remote switch
 remote_password = "0227DcDc!"
-ALL_HOSTS = {}
-
 
 class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
     def __init__(self, fibMgr, agentMgr):
@@ -65,20 +62,10 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
 
     def on_initialized(self):
         self.tracer.trace0("We are initialized!")
-        self.agentMgr_.status_set("Peer Router", str(self.PEER))
         self._to_syslog("Agent STARTED", 'DHCPv6 PD Route Sync Agent Initialized')
         # Loop through any pre existing configurations to load
         for _option in self.agentMgr_.agent_option_iter():
             self.on_agent_option(_option, self.agentMgr_.agent_option(_option))
-        # Debugging section REMOVE LATER
-        for _route in self.fibMgr_.fib_route_iter():
-            try:
-                if _route.route_type() == eossdk.ROUTE_TYPE_UNKNOWN:
-                    if "/{mask}".format(mask = self.agentMgr_.agent_option("pdmask")) in _route.route_key().prefix().to_string():
-                        self._to_syslog("DEBUG",_route.to_string())
-                #self._to_syslog("DEBUG",_route.route_key().prefix().to_string())
-            except:
-                self._to_syslog("DEBUG","ERROR")
 
     def on_agent_option(self,optionName, value):
         """
@@ -88,104 +75,113 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
             key = optionName,
             value = value
         ))
-        if optionName.lower() == "pdmask":
-            if int(value) not in range(48, 64):
-                self._to_syslog("Valid Prefix Delegation Mask Length is from /48 to /64")
-                self.agentMgr_.status_set(optionName, "INVALID")
-            else:
-                self.agentMgr_.status_set(optionName, value)
-        elif optionName.lower() == 'vrf':
-            if value not in "TEST123":
-                self._to_syslog("Invalid VRF Selection")
-                self.agentMgr_.status_set(optionName, "INVALID")
-            else:
-                self.agentMgr_.status_set(optionName, value)
-        else:
-        # Catch All for any destinations/hosts
-            new_host = True
-            # Called if VRF option is to be removed
-            if not value:
-                self._to_syslog("Option REMOVED", "Removing VRF {vrf}".format(
-                    vrf = value
-                ))
-                self.agentMgr_.status_del(optionName)
-            #Addition/Update of host
-            else:
-                _node_ip = self.verify_ip_addr(value)
-                if optionName in ALL_HOSTS:
-                    if ALL_HOSTS[optionName].ip != '':
-                        new_host = False
-                # Check if IP Address if valid
-                if _node_ip:
-                    if new_host:
-                            self._to_syslog("HOST ADDED", "{node} node added for updates".format(
-                                node = optionName
-                            ))
-                            new_host.set_msg("Initializing Host Route")
-                            ALL_HOSTS[optionName] = new_host
-                            self.agentMgr_.status_set(optionName, new_host.status_msg)
-                    else:
-                        if optionName in ALL_HOSTS:
-                            ALL_HOSTS[optionName].full_ip = _node_ip
-                    route_prefix = self.find_route_prefix(_node_ip)
-                    if route_prefix:
-                        _route_via = self.get_route_via(route_prefix)
-                        _str_next_hop = _route_via.hop().to_string()
-                        _str_route_prefix = route_prefix.route_key().prefix().to_string()
-                        self._to_syslog("INFO", "Found {route} route via destination {via}".format(
-                            route = _str_route_prefix,
-                            via = _str_next_hop
-                        ))
-                        ALL_HOSTS[optionName].set_prefix(_str_route_prefix)
-                        ALL_HOSTS[optionName].set_next_hop(_str_next_hop)
-                        ALL_HOSTS[optionName].set_msg("{network} network via {hop} next-hop".format(
-                            network = _str_route_prefix,
-                            hop = _str_next_hop
-                        ))
-                        self.agentMgr_.status_set(optionName, new_host.status_msg)
-                        self.add_kernel_route(str(_node_ip), _str_next_hop)
-                else:
-                    self._to_syslog("HOST ERROR", "{node} node does not have a valid IPv4 Address, Provided: {ip}".format(
-                        node = optionName,
-                        ip = value
-                    ))
+        #if optionName.lower() == "pdmask":
+        #    if int(value) not in range(48, 65):
+        #        self._to_syslog("Valid Prefix Delegation Mask Length is from /48 to /64")
+        #        self.agentMgr_.status_set(optionName, "INVALID")
+        #    else:
+        #        self.agentMgr_.status_set(optionName, value)
+        #elif optionName.lower() == 'vrf':
+        #    if value not in "TEST123":
+        #        self._to_syslog("Invalid VRF Selection")
+        #        self.agentMgr_.status_set(optionName, "INVALID")
+        #    else:
+        #        self.agentMgr_.status_set(optionName, value)
+        self.agentMgr_.status_set(optionName, value)
+        for _route in self.fibMgr_.fib_route_iter():
+            if _route.route_type() == eossdk.ROUTE_TYPE_UNKNOWN:
+                try:
+                    self._to_syslog("DEBUG",_route.to_string())
+                    self._to_syslog("DEBUG",_route.route_key().prefix().to_string())
+                except:
+                    self._to_syslog("DEBUG","ERROR")
+#        else:
+#        # Catch All for any destinations/hosts
+#            new_host = True
+#            # Called if VRF option is to be removed
+#            if not value:
+#                self._to_syslog("Option REMOVED", "Removing VRF {vrf}".format(
+#                    vrf = value
+#                ))
+#                self.agentMgr_.status_del(optionName)
+#            #Addition/Update of host
+#            else:
+#                _node_ip = self.verify_ip_addr(value)
+#                if optionName in ALL_HOSTS:
+#                    if ALL_HOSTS[optionName].ip != '':
+#                        new_host = False
+#                # Check if IP Address if valid
+#                if _node_ip:
+#                    if new_host:
+#                            self._to_syslog("HOST ADDED", "{node} node added for updates".format(
+#                                node = optionName
+#                            ))
+#                            new_host.set_msg("Initializing Host Route")
+#                            ALL_HOSTS[optionName] = new_host
+#                            self.agentMgr_.status_set(optionName, new_host.status_msg)
+#                    else:
+#                        if optionName in ALL_HOSTS:
+#                            ALL_HOSTS[optionName].full_ip = _node_ip
+#                    route_prefix = self.find_route_prefix(_node_ip)
+#                    if route_prefix:
+#                        _route_via = self.get_route_via(route_prefix)
+#                        _str_next_hop = _route_via.hop().to_string()
+#                        _str_route_prefix = route_prefix.route_key().prefix().to_string()
+#                        self._to_syslog("INFO", "Found {route} route via destination {via}".format(
+#                            route = _str_route_prefix,
+#                            via = _str_next_hop
+#                        ))
+#                        ALL_HOSTS[optionName].set_prefix(_str_route_prefix)
+#                        ALL_HOSTS[optionName].set_next_hop(_str_next_hop)
+#                        ALL_HOSTS[optionName].set_msg("{network} network via {hop} next-hop".format(
+#                            network = _str_route_prefix,
+#                            hop = _str_next_hop
+#                        ))
+#                        self.agentMgr_.status_set(optionName, new_host.status_msg)
+#                        #self.add_kernel_route(str(_node_ip), _str_next_hop)
+#                else:
+#                    self._to_syslog("HOST ERROR", "{node} node does not have a valid IPv4 Address, Provided: {ip}".format(
+#                        node = optionName,
+#                        ip = value
+#                    ))
         # ADD LOGIC FOR NEW PEER ROUTER OPTION
 
-    def find_route_prefix(self, _dest_ip):
-        """
-        Function to perform a lookup on the route table to find the destination route prefix
-        for a given destion host IP.
-        Parameters:
-        _dest_ip = IP Address for the host (IP Addr_object)
-        """
-        for _route in self.fibMgr_.fib_route_iter():
-            if _route.route_type() != eossdk.ROUTE_TYPE_KERNEL:
-                _tmp_prefix = ipaddress.ip_network(u"{network}".format(
-                    network = _route.route_key().prefix().to_string()
-                ))
-                if _dest_ip in _tmp_prefix:
-                    self._to_syslog("OK", "Host {host} is in {route}".format(
-                        host = str(_dest_ip),
-                        route  = _route.route_key().prefix().to_string()
-                    ))
-                    return(_route)
-        else:
-            return(False)
-    
-    def get_route_via(self, _ip_route):
-        """
-        Function to get the next hop for a specified route.
-        Parameters:
-        _ip_route = EosSdk ip_route type
-        """
-        _fec_id = _ip_route.fec_id()
-        _tmp_fec = self.fibMgr_.fib_fec(eossdk.FibFecKey(_fec_id))
-        _route_via = _tmp_fec.via()
-        return(_route_via[0])
+#    def find_route_prefix(self, _dest_ip):
+#        """
+#        Function to perform a lookup on the route table to find the destination route prefix
+#        for a given destion host IP.
+#        Parameters:
+#        _dest_ip = IP Address for the host (IP Addr_object)
+#        """
+#        for _route in self.fibMgr_.fib_route_iter():
+#            if _route.route_type() != eossdk.ROUTE_TYPE_KERNEL:
+#                _tmp_prefix = ipaddress.ip_network(u"{network}".format(
+#                    network = _route.route_key().prefix().to_string()
+#                ))
+#                if _dest_ip in _tmp_prefix:
+#                    self._to_syslog("OK", "Host {host} is in {route}".format(
+#                        host = str(_dest_ip),
+#                        route  = _route.route_key().prefix().to_string()
+#                    ))
+#                    return(_route)
+#        else:
+#            return(False)
+#    
+#    def get_route_via(self, _ip_route):
+#        """
+#        Function to get the next hop for a specified route.
+#        Parameters:
+#        _ip_route = EosSdk ip_route type
+#        """
+#        _fec_id = _ip_route.fec_id()
+#        _tmp_fec = self.fibMgr_.fib_fec(eossdk.FibFecKey(_fec_id))
+#        _route_via = _tmp_fec.via()
+#        return(_route_via[0])
         
 
 #    def on_route_set(self, _fib_route_update):
-#        if _fib_route_update.route_type() != eossdk.ROUTE_TYPE_KERNEL:
+#        if _fib_route_update.route_type() == eossdk.ROUTE_TYPE_UNKNOWN:
+#            if self.
 #            _route = _fib_route_update.route_key()
 #            _route_prefix = ipaddress.ip_network(u"{network}".format(
 #                network = _route.prefix().to_string()
@@ -221,20 +217,20 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
 #                        ))
 
 
-    def verify_ip_addr(self, ip_string):
-        """
-        Function to check if provided IP is valid.
-        Parameters:
-        ip_string = IP Address (10.10.10.10)
-        """
-        self._to_syslog("INFO", "Verifying provided host address of {ip}".format(
-            ip = ip_string
-        ))
-        try:
-            _ip_addr = ipaddress.ip_address(u"{}".format(ip_string))
-            return(_ip_addr)
-        except:
-            return(False)
+#    def verify_ip_addr(self, ip_string):
+#        """
+#        Function to check if provided IP is valid.
+#        Parameters:
+#        ip_string = IP Address (10.10.10.10)
+#        """
+#        self._to_syslog("INFO", "Verifying provided host address of {ip}".format(
+#            ip = ip_string
+#        ))
+#        try:
+#            _ip_addr = ipaddress.ip_address(u"{}".format(ip_string))
+#            return(_ip_addr)
+#        except:
+#            return(False)
 
 #    def add_kernel_route(self, _host_ip, _host_via):
 #        """
@@ -298,20 +294,20 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
 #            ))
 #        return(kernel_route_delete)
 
-    def _remove_host(self,rem_device):
-        #Function to remove the old status and device from list
-        if ALL_HOSTS:
-            if rem_device in ALL_HOSTS:
-                _host = ALL_HOSTS[rem_device]
-                self.agentMgr_.status_del(rem_device)
-                # Remove any static route for host
-                self.remove_kernel_route(str(_host.full_ip), str(_host.next_hop))
-                try:
-                    ALL_HOSTS.pop(rem_device)
-                except:
-                    self._to_syslog("Option ERROR", "Option {name} not found internally, not removing".format(
-                        name = rem_device
-                    ))
+#    def _remove_host(self,rem_device):
+#        #Function to remove the old status and device from list
+#        if ALL_HOSTS:
+#            if rem_device in ALL_HOSTS:
+#                _host = ALL_HOSTS[rem_device]
+#                self.agentMgr_.status_del(rem_device)
+#                # Remove any static route for host
+#                self.remove_kernel_route(str(_host.full_ip), str(_host.next_hop))
+#                try:
+#                    ALL_HOSTS.pop(rem_device)
+#                except:
+#                    self._to_syslog("Option ERROR", "Option {name} not found internally, not removing".format(
+#                        name = rem_device
+#                    ))
 
     def _to_syslog(self, sys_type, sys_msg):
         syslog.syslog("%%SDK-DHCPv6PDRouteSync-Log-6-LOG: {type}: {msg}".format(
