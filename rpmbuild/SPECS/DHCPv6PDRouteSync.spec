@@ -1,6 +1,6 @@
-Summary: RouteUpdate
-Name: RouteUpdate
-Version: 0.4.0
+Summary: DHCPv6PDRouteSync
+Name: DHCPv6PDRouteSync
+Version: 0.1.0
 Release: 1
 License: Arista Networks
 Group: EOS/Extension
@@ -19,11 +19,11 @@ This EOS SDK script will monitor IP Routes and update Linux Kernel Routes.
 %install
 mkdir -p $RPM_BUILD_ROOT/usr/bin
 mkdir -p $RPM_BUILD_ROOT/usr/lib/SysdbMountProfiles
-cp RouteUpdate.mp $RPM_BUILD_ROOT/usr/lib/SysdbMountProfiles/RouteUpdate
-cp RouteUpdate $RPM_BUILD_ROOT/usr/bin/
+cp DHCPv6PDRouteSync.mp $RPM_BUILD_ROOT/usr/lib/SysdbMountProfiles/DHCPv6PDRouteSync
+cp DHCPv6PDRouteSync $RPM_BUILD_ROOT/usr/bin/
 
 %files
 %defattr(-,root,root,-)
-/usr/bin/RouteUpdate
-/usr/lib/SysdbMountProfiles/RouteUpdate
-%attr(0755,root,root) /usr/bin/RouteUpdate
+/usr/bin/DHCPv6PDRouteSync
+/usr/lib/SysdbMountProfiles/DHCPv6PDRouteSync
+%attr(0755,root,root) /usr/bin/DHCPv6PDRouteSync

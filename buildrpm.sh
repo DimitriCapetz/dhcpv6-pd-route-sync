@@ -10,8 +10,8 @@ esac
 done
 
 APP=$name
-PROJECT='eos-sdk-route-update'
-DUT='192.168.20.1'
+PROJECT='dhcpv6-pd-route-sync'
+DUT='10.111.111.1'
 echo "Creating RPM Directories"
 mkdir -p rpmbuild/SOURCES
 mkdir -p rpmbuild/RPM
@@ -43,7 +43,7 @@ echo "Start file transfer and swix create"
 scp -i ~/.ssh/builder /workspaces/${PROJECT}/rpmbuild/RPM/noarch/${APP}-${VERSION}-${RELEASE}.noarch.rpm builder@${DUT}:/mnt/flash/ext-eos/
 scp -i ~/.ssh/builder manifest.txt builder@${DUT}:/mnt/flash/ext-eos/
 
-ssh -i ~/.ssh/builder builder@${DUT} bash swix create /mnt/flash/ext-eos/swix/${APP}-${VERSION}-${RELEASE}.swix /mnt/flash/ext-eos/${APP}-${VERSION}-${RELEASE}.noarch.rpm
+ssh -i ~/.ssh/builder builder@${DUT} swix create /mnt/flash/ext-eos/swix/${APP}-${VERSION}-${RELEASE}.swix /mnt/flash/ext-eos/${APP}-${VERSION}-${RELEASE}.noarch.rpm
 
 scp -i ~/.ssh/builder builder@${DUT}:/mnt/flash/ext-eos/swix/${APP}-${VERSION}-${RELEASE}.swix /workspaces/${PROJECT}/extension/
 echo "OK"

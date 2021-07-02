@@ -1,4 +1,4 @@
-# EOS SDK Route Update
+# DHCPv6 Prefix Delegation Route Sync
 
 This EOS SDK Agent is used to add a kernel static route for specified destination hosts with a specific MTU value. When a route update occurs on the switch for any of the routes, this agent will evaluate the route for the configured destinations and update any kernel static routes.
 

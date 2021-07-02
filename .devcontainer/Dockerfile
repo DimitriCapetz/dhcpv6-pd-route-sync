@@ -22,7 +22,7 @@ RUN groupadd --gid $USER_GID $USERNAME \
 
 RUN echo "eosdev ALL=(ALL:ALL) NOPASSWD:ALL" >> /etc/sudoers && \
     echo "# macros"                      >  /home/eosdev/.rpmmacros && \
-    echo "%_topdir    /workspaces/eos-sdk-route-update/rpmbuild" >> /home/eosdev/.rpmmacros && \
+    echo "%_topdir    /workspaces/dhcpv6-pd-route-sync/rpmbuild" >> /home/eosdev/.rpmmacros && \
     echo "%_sourcedir %{_topdir}/SOURCES"        >> /home/eosdev/.rpmmacros && \
     echo "%_builddir  %{_topdir}/BUILD"        >> /home/eosdev/.rpmmacros && \
     echo "%_specdir   %{_topdir}/SPECS"        >> /home/eosdev/.rpmmacros && \
@@ -37,7 +37,7 @@ COPY .devcontainer/src/eossdk.py /usr/lib/python2.7/
 
 USER eosdev
 
-ENV name='RouteUpdate'
+ENV name='DHCPv6PDRouteSync'
 
 # Install oh-my-zsh
 

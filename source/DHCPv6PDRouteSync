@@ -43,54 +43,42 @@ import syslog
 import sys
 import time
 import re
+from jsonrpclib import Server
 from subprocess import call, PIPE
 
-__author__ = 'robmartin'
-__version__ = '0.4.0'
+__author__ = 'robmartin, dcapetz'
+__version__ = '0.1.0'
 
-MTU_DEFAULT = 1500
+# Global variables - Credentials for remote switch
+remote_password = "0227DcDc!"
 ALL_HOSTS = {}
 
-class DESTHOST():
-    def __init__(self, host_name, host_ip):
-        self.name = host_name
-        self.full_ip = host_ip
-        self.ip_address = ""
-        self.route_network = ''
-        self.next_hop = ''
-        self.status_msg = ""
 
-    def set_prefix(self, ip_route):
-        self.route_network = ip_route
-
-    def set_next_hop(self, via):
-        self.next_hop = via
-
-    def set_msg(self,msg):
-        self.status_msg = msg
-    
-    def del_msg(self):
-        self.status_msg = ''
-
-
-
-class ROUTEUPDATE(eossdk.AgentHandler, eossdk.FibHandler):
+class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
     def __init__(self, fibMgr, agentMgr):
         eossdk.AgentHandler.__init__(self,agentMgr)
         eossdk.FibHandler.__init__(self,fibMgr)
-        self.tracer = eossdk.Tracer("EosSdkRouteUpdate")
+        self.tracer = eossdk.Tracer("DHCPv6PDRouteSync")
         self.fibMgr_ = fibMgr
         self.agentMgr_ = agentMgr
-        self.MTU = MTU_DEFAULT
         self.tracer.trace0("Constructed")
 
     def on_initialized(self):
         self.tracer.trace0("We are initialized!")
-        self.agentMgr_.status_set("MTU", str(self.MTU))
-        self._to_syslog("Agent STARTED", 'Route Upate Agent Initialized')
+        self.agentMgr_.status_set("Peer Router", str(self.PEER))
+        self._to_syslog("Agent STARTED", 'DHCPv6 PD Route Sync Agent Initialized')
         # Loop through any pre existing configurations to load
         for _option in self.agentMgr_.agent_option_iter():
             self.on_agent_option(_option, self.agentMgr_.agent_option(_option))
+        # Debugging section REMOVE LATER
+        for _route in self.fibMgr_.fib_route_iter():
+            try:
+                if _route.route_type() == eossdk.ROUTE_TYPE_UNKNOWN:
+                    if "/{mask}".format(mask = self.agentMgr_.agent_option("pdmask")) in _route.route_key().prefix().to_string():
+                        self._to_syslog("DEBUG",_route.to_string())
+                #self._to_syslog("DEBUG",_route.route_key().prefix().to_string())
+            except:
+                self._to_syslog("DEBUG","ERROR")
 
     def on_agent_option(self,optionName, value):
         """
@@ -100,44 +88,27 @@ class ROUTEUPDATE(eossdk.AgentHandler, eossdk.FibHandler):
             key = optionName,
             value = value
         ))
-        if optionName.lower() == 'mtu':
-            if value:
-                # Perform check on MTU value
-                try:
-                    _mtu = int(value)
-                    if _mtu >= 68 and _mtu <= 65535:
-                        self._to_syslog("Option UPDATED", "MTU value changed from %s to %s"%(self.MTU,value))
-                        self.MTU = _mtu
-                    else:
-                        self._to_syslog("Option Error", "MTU value needs to be between 68-65535 bytes.")
-                except:
-                    self._to_syslog("Option Error", "Entered MTU value is not an integer. Should be between 68-65535.")
+        if optionName.lower() == "pdmask":
+            if int(value) not in range(48, 64):
+                self._to_syslog("Valid Prefix Delegation Mask Length is from /48 to /64")
+                self.agentMgr_.status_set(optionName, "INVALID")
             else:
-                self._to_syslog("Option UPDATED", "MTU value changed from %s to 10"%(self.MTU))
-                self.MTU = MTU_DEFAULT
-            self.agentMgr_.status_set("MTU", str(self.MTU))
-            # Loop through all Hosts and update the MTU
-            if ALL_HOSTS:
-                for _host in ALL_HOSTS:
-                    _dest_host = ALL_HOSTS[_host]
-                    self._to_syslog("INFO", "Updating route for {host} with new MTU of {mtu}".format(
-                        host = str(_dest_host.full_ip),
-                        mtu = self.MTU
-                    ))
-                    # Remove old kernel static route
-                    self.remove_kernel_route(str(_dest_host.full_ip), _dest_host.next_hop)
-                    # Add updated kernel static route
-                    self.add_kernel_route(str(_dest_host.full_ip), _dest_host.next_hop)
-                self._to_syslog("OK", "Updated all configured destination host kernel static routes with new MTU")
-        # Catch All for any destinations/hosts
+                self.agentMgr_.status_set(optionName, value)
+        elif optionName.lower() == 'vrf':
+            if value not in "TEST123":
+                self._to_syslog("Invalid VRF Selection")
+                self.agentMgr_.status_set(optionName, "INVALID")
+            else:
+                self.agentMgr_.status_set(optionName, value)
         else:
+        # Catch All for any destinations/hosts
             new_host = True
-            # Called if Host option is to be removed
+            # Called if VRF option is to be removed
             if not value:
-                self._to_syslog("Option REMOVED", "Remove destination {dest}".format(
-                    dest = optionName
+                self._to_syslog("Option REMOVED", "Removing VRF {vrf}".format(
+                    vrf = value
                 ))
-                self._remove_host(optionName)
+                self.agentMgr_.status_del(optionName)
             #Addition/Update of host
             else:
                 _node_ip = self.verify_ip_addr(value)
@@ -150,7 +121,6 @@ class ROUTEUPDATE(eossdk.AgentHandler, eossdk.FibHandler):
                             self._to_syslog("HOST ADDED", "{node} node added for updates".format(
                                 node = optionName
                             ))
-                            new_host = DESTHOST(optionName, _node_ip)
                             new_host.set_msg("Initializing Host Route")
                             ALL_HOSTS[optionName] = new_host
                             self.agentMgr_.status_set(optionName, new_host.status_msg)
@@ -179,6 +149,7 @@ class ROUTEUPDATE(eossdk.AgentHandler, eossdk.FibHandler):
                         node = optionName,
                         ip = value
                     ))
+        # ADD LOGIC FOR NEW PEER ROUTER OPTION
 
     def find_route_prefix(self, _dest_ip):
         """
@@ -213,41 +184,41 @@ class ROUTEUPDATE(eossdk.AgentHandler, eossdk.FibHandler):
         return(_route_via[0])
         
 
-    def on_route_set(self, _fib_route_update):
-        if _fib_route_update.route_type() != eossdk.ROUTE_TYPE_KERNEL:
-            _route = _fib_route_update.route_key()
-            _route_prefix = ipaddress.ip_network(u"{network}".format(
-                network = _route.prefix().to_string()
-            ))
-            for _host in ALL_HOSTS:
-                _dest_host = ALL_HOSTS[_host]
-                if _dest_host.full_ip in _route_prefix:
-                    # Grab information about the route for next-hop
-                    _fec_id = _fib_route_update.fec_id()
-                    _tmp_fec = self.fibMgr_.fib_fec(eossdk.FibFecKey(_fec_id))
-                    _route_via = _tmp_fec.via()
-                    if len(_route_via) > 0:
-                        _str_route_via = _route_via[0].hop().to_string()
-                        if _dest_host.next_hop != _str_route_via:
-                            self._to_syslog("INFO", "Updated {host} host to {hop} next-hop".format(
-                                host = str(_dest_host.full_ip),
-                                hop = _str_route_via
-                            ))
-                            # Remove old static Route
-                            self.remove_kernel_route(str(_dest_host.full_ip), _dest_host.next_hop)
-                            # Prepare for updated static route
-                            _dest_host.set_next_hop(_str_route_via)
-                            _dest_host.set_msg("{network} network via {hop} next-hop".format(
-                                network = _dest_host.route_network,
-                                hop = _str_route_via
-                            ))
-                            self.agentMgr_.status_set(_host, _dest_host.status_msg)
-                            ALL_HOSTS[_host] = _dest_host
-                            self.add_kernel_route(str(_dest_host.full_ip), _str_route_via)
-                        self._to_syslog("INFO", "Route to {dest} via {hop}".format(
-                            dest = _fib_route_update.route_key().prefix().to_string(),
-                            hop = _str_route_via
-                        ))
+#    def on_route_set(self, _fib_route_update):
+#        if _fib_route_update.route_type() != eossdk.ROUTE_TYPE_KERNEL:
+#            _route = _fib_route_update.route_key()
+#            _route_prefix = ipaddress.ip_network(u"{network}".format(
+#                network = _route.prefix().to_string()
+#            ))
+#            for _host in ALL_HOSTS:
+#                _dest_host = ALL_HOSTS[_host]
+#                if _dest_host.full_ip in _route_prefix:
+#                    # Grab information about the route for next-hop
+#                    _fec_id = _fib_route_update.fec_id()
+#                    _tmp_fec = self.fibMgr_.fib_fec(eossdk.FibFecKey(_fec_id))
+#                    _route_via = _tmp_fec.via()
+#                    if len(_route_via) > 0:
+#                        _str_route_via = _route_via[0].hop().to_string()
+#                        if _dest_host.next_hop != _str_route_via:
+#                            self._to_syslog("INFO", "Updated {host} host to {hop} next-hop".format(
+#                                host = str(_dest_host.full_ip),
+#                                hop = _str_route_via
+#                            ))
+#                            # Remove old static Route
+#                            self.remove_kernel_route(str(_dest_host.full_ip), _dest_host.next_hop)
+#                            # Prepare for updated static route
+#                            _dest_host.set_next_hop(_str_route_via)
+#                            _dest_host.set_msg("{network} network via {hop} next-hop".format(
+#                                network = _dest_host.route_network,
+#                                hop = _str_route_via
+#                            ))
+#                            self.agentMgr_.status_set(_host, _dest_host.status_msg)
+#                            ALL_HOSTS[_host] = _dest_host
+#                            self.add_kernel_route(str(_dest_host.full_ip), _str_route_via)
+#                        self._to_syslog("INFO", "Route to {dest} via {hop}".format(
+#                            dest = _fib_route_update.route_key().prefix().to_string(),
+#                            hop = _str_route_via
+#                        ))
 
 
     def verify_ip_addr(self, ip_string):
@@ -265,67 +236,67 @@ class ROUTEUPDATE(eossdk.AgentHandler, eossdk.FibHandler):
         except:
             return(False)
 
-    def add_kernel_route(self, _host_ip, _host_via):
-        """
-        Function to remove a static route programmed into the kernel
-        Parameters:
-        _host_ip = IP Address for the destination (string)
-        _host_via = IP Route Next Hop (string)
-        """
-        add_route = [
-            "ip",
-            "route",
-            "add",
-            "{host}/32".format(host=_host_ip),
-            "via",
-            _host_via,
-            "mtu",
-            str(self.MTU)
-        ]
-        try:
-            kernel_route_add = call(add_route, stdout=PIPE, stderr=PIPE)
-            self._to_syslog("OK", "Added Kernel route for {host} via {hop} with MTU {mtu}".format(
-                host = _host_ip,
-                hop = _host_via,
-                mtu = self.MTU
-            ))
-        except:
-            kernel_route_add = 6
-            self._to_syslog("ERROR", "Issue adding Kernel route for {host} via {hop} with MTU {mtu}".format(
-                host = _host_ip,
-                hop = _host_via,
-                mtu = self.MTU
-            ))
-        return(kernel_route_add)
-
-    def remove_kernel_route(self, _host_ip, _host_via):
-        """
-        Function to remove a static route programmed into the kernel
-        Parameters:
-        _host_ip = IP Address for the destination (string)
-        _host_via = IP Route Next Hop (string)
-        """
-        del_route = [
-            "ip",
-            "route",
-            "delete",
-            "{host}/32".format(host=_host_ip),
-            "via",
-            _host_via
-        ]
-        try:
-            kernel_route_delete = call(del_route, stdout=PIPE, stderr=PIPE)
-            self._to_syslog("OK", "Removed Kernel route for {host} via {hop}".format(
-                host = _host_ip,
-                hop = _host_via
-            ))
-        except:
-            kernel_route_delete = 6
-            self._to_syslog("ERROR", "Issue removing Kernel route for {host} via {hop}".format(
-                host = _host_ip,
-                hop = _host_via
-            ))
-        return(kernel_route_delete)
+#    def add_kernel_route(self, _host_ip, _host_via):
+#        """
+#        Function to remove a static route programmed into the kernel
+#        Parameters:
+#        _host_ip = IP Address for the destination (string)
+#        _host_via = IP Route Next Hop (string)
+#        """
+#        add_route = [
+#            "ip",
+#            "route",
+#            "add",
+#            "{host}/32".format(host=_host_ip),
+#            "via",
+#            _host_via,
+#            "mtu",
+#            str(self.MTU)
+#        ]
+#        try:
+#            kernel_route_add = call(add_route, stdout=PIPE, stderr=PIPE)
+#            self._to_syslog("OK", "Added Kernel route for {host} via {hop} with MTU {mtu}".format(
+#                host = _host_ip,
+#                hop = _host_via,
+#                mtu = self.MTU
+#            ))
+#        except:
+#            kernel_route_add = 6
+#            self._to_syslog("ERROR", "Issue adding Kernel route for {host} via {hop} with MTU {mtu}".format(
+#                host = _host_ip,
+#                hop = _host_via,
+#                mtu = self.MTU
+#            ))
+#        return(kernel_route_add)
+#
+#    def remove_kernel_route(self, _host_ip, _host_via):
+#        """
+#        Function to remove a static route programmed into the kernel
+#        Parameters:
+#        _host_ip = IP Address for the destination (string)
+#        _host_via = IP Route Next Hop (string)
+#        """
+#        del_route = [
+#            "ip",
+#            "route",
+#            "delete",
+#            "{host}/32".format(host=_host_ip),
+#            "via",
+#            _host_via
+#        ]
+#        try:
+#            kernel_route_delete = call(del_route, stdout=PIPE, stderr=PIPE)
+#            self._to_syslog("OK", "Removed Kernel route for {host} via {hop}".format(
+#                host = _host_ip,
+#                hop = _host_via
+#            ))
+#        except:
+#            kernel_route_delete = 6
+#            self._to_syslog("ERROR", "Issue removing Kernel route for {host} via {hop}".format(
+#                host = _host_ip,
+#                hop = _host_via
+#            ))
+#        return(kernel_route_delete)
 
     def _remove_host(self,rem_device):
         #Function to remove the old status and device from list
@@ -343,7 +314,7 @@ class ROUTEUPDATE(eossdk.AgentHandler, eossdk.FibHandler):
                     ))
 
     def _to_syslog(self, sys_type, sys_msg):
-        syslog.syslog("%%SDK-RouteUpdate-Log-6-LOG: {type}: {msg}".format(
+        syslog.syslog("%%SDK-DHCPv6PDRouteSync-Log-6-LOG: {type}: {msg}".format(
             type = sys_type,
             msg = sys_msg
         ))
@@ -351,7 +322,7 @@ class ROUTEUPDATE(eossdk.AgentHandler, eossdk.FibHandler):
         
 
 if __name__ == '__main__':
-    syslog.openlog('SDK-RouteUpdate-Log',0,syslog.LOG_LOCAL4)
+    syslog.openlog('SDK-DHCPv6PDRouteSync-Log',0,syslog.LOG_LOCAL4)
     sdk = eossdk.Sdk()
-    _ = ROUTEUPDATE(sdk.get_fib_mgr(eossdk.MODE_TYPE_READ_NOTIFYING),sdk.get_agent_mgr())
+    _ = DHCPV6PDROUTESYNC(sdk.get_fib_mgr(eossdk.MODE_TYPE_READ_NOTIFYING),sdk.get_agent_mgr())
     sdk.main_loop(sys.argv)
