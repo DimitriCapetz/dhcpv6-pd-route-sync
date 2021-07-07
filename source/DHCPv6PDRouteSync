@@ -163,7 +163,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
         _fec_id = _ip_route.fec_id()
         _tmp_fec = self.fibMgr_.fib_fec(eossdk.FibFecKey(_fec_id))
         self._to_syslog("DEBUG",_tmp_fec.to_string())
-        #self._to_syslog("DEBUG",_tmp_fec.via.to_string())
+        #self._to_syslog("DEBUG",_tmp_fec.via().to_string())
         _route_via = _tmp_fec.via()
         return(_route_via[0])
         
