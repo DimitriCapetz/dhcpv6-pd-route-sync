@@ -74,6 +74,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
         # Loop through any pre existing configurations to load
         for _option in self.agentMgr_.agent_option_iter():
             self.on_agent_option(_option, self.agentMgr_.agent_option(_option))
+        # ADD TASK TO CHECK PEER ON INITIALIZATION AND PULL IN ALL EXISTING ROUTES
 
     def on_agent_option(self,optionName, value):
         """
@@ -83,6 +84,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
             key = optionName,
             value = value
         ))
+        # ADD LOGIC CHECKS AND VALIDATION FOR OPTIONS
         #if optionName.lower() == "pdmask":
         #    if int(value) not in range(48, 65):
         #        self._to_syslog("Valid Prefix Delegation Mask Length is from /48 to /64")
@@ -180,6 +182,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
         
 
     def on_route_set(self, _fib_route_update):
+        # Add logic to check if overlapping static route exists and delete
         mask = "/{mask}".format(mask = self.agentMgr_.agent_option("pdmask"))
         if _fib_route_update.route_type() == eossdk.ROUTE_TYPE_UNKNOWN:
             if mask in _fib_route_update.route_key().prefix().to_string():
@@ -212,7 +215,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
         _intf = Nexthop Interface (string)
         _via = Nexthop IPv6 Address (string)
         """
-        route_cmd = "ipv6 route {prefix} {intf} {via}".format(
+        route_cmd = "ipv6 route {prefix} {intf} {via} 240".format(
             prefix = _prefix,
             intf = _intf,
             via = _via
