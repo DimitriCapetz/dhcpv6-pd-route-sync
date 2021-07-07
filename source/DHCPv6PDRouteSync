@@ -27,7 +27,7 @@
 # OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
 # IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# eos-sdk-route-update
+# dhcpv6-pd-route-sync
 #
 #    Written by:
 #       Rob Martin, Arista Networks
@@ -37,7 +37,6 @@
 This EOS SDK script will mount the state of the Route Table
 """
 
-import ipaddress
 import eossdk
 import syslog
 import sys
@@ -88,13 +87,22 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
         #    else:
         #        self.agentMgr_.status_set(optionName, value)
         self.agentMgr_.status_set(optionName, value)
-        for _route in self.fibMgr_.fib_route_iter():
-            if _route.route_type() == eossdk.ROUTE_TYPE_UNKNOWN:
-                try:
-                    self._to_syslog("DEBUG",_route.to_string())
-                    self._to_syslog("DEBUG",_route.route_key().prefix().to_string())
-                except:
-                    self._to_syslog("DEBUG","ERROR")
+        if optionName == "pdmask":
+            for _route in self.fibMgr_.fib_route_iter():
+                if _route.route_type() == eossdk.ROUTE_TYPE_UNKNOWN:
+                    if "/{value}".format(value = value) in _route.route_key().prefix().to_string():
+                        try:
+                            _route_via = self.get_route_via(_route)
+                            self._to_syslog("DEBUG","GOT VIA")
+                            _str_prefix = _route.route_key().prefix().to_string()
+                            _str_next_hop = _route_via.hop().to_string()
+                            _str_next_hop_intf = _route_via.intf().to_string()
+                            self._to_syslog("DEBUG",_str_prefix)
+                            self._to_syslog("DEBUG",_str_next_hop_intf)
+                            self._to_syslog("DEBUG",_str_next_hop)
+                            self.add_peer_route(_str_prefix, _str_next_hop_intf, _str_next_hop)
+                        except:
+                            self._to_syslog("DEBUG","ERROR")
 #        else:
 #        # Catch All for any destinations/hosts
 #            new_host = True
@@ -145,38 +153,19 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
 #                        ip = value
 #                    ))
         # ADD LOGIC FOR NEW PEER ROUTER OPTION
-
-#    def find_route_prefix(self, _dest_ip):
-#        """
-#        Function to perform a lookup on the route table to find the destination route prefix
-#        for a given destion host IP.
-#        Parameters:
-#        _dest_ip = IP Address for the host (IP Addr_object)
-#        """
-#        for _route in self.fibMgr_.fib_route_iter():
-#            if _route.route_type() != eossdk.ROUTE_TYPE_KERNEL:
-#                _tmp_prefix = ipaddress.ip_network(u"{network}".format(
-#                    network = _route.route_key().prefix().to_string()
-#                ))
-#                if _dest_ip in _tmp_prefix:
-#                    self._to_syslog("OK", "Host {host} is in {route}".format(
-#                        host = str(_dest_ip),
-#                        route  = _route.route_key().prefix().to_string()
-#                    ))
-#                    return(_route)
-#        else:
-#            return(False)
-#    
-#    def get_route_via(self, _ip_route):
-#        """
-#        Function to get the next hop for a specified route.
-#        Parameters:
-#        _ip_route = EosSdk ip_route type
-#        """
-#        _fec_id = _ip_route.fec_id()
-#        _tmp_fec = self.fibMgr_.fib_fec(eossdk.FibFecKey(_fec_id))
-#        _route_via = _tmp_fec.via()
-#        return(_route_via[0])
+    
+    def get_route_via(self, _ip_route):
+        """
+        Function to get the next hop for a specified route.
+        Parameters:
+        _ip_route = EosSdk ip_route type
+        """
+        _fec_id = _ip_route.fec_id()
+        _tmp_fec = self.fibMgr_.fib_fec(eossdk.FibFecKey(_fec_id))
+        self._to_syslog("DEBUG",_tmp_fec.to_string())
+        #self._to_syslog("DEBUG",_tmp_fec.via.to_string())
+        _route_via = _tmp_fec.via()
+        return(_route_via[0])
         
 
 #    def on_route_set(self, _fib_route_update):
@@ -216,21 +205,20 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
 #                            hop = _str_route_via
 #                        ))
 
-
-#    def verify_ip_addr(self, ip_string):
-#        """
-#        Function to check if provided IP is valid.
-#        Parameters:
-#        ip_string = IP Address (10.10.10.10)
-#        """
-#        self._to_syslog("INFO", "Verifying provided host address of {ip}".format(
-#            ip = ip_string
-#        ))
-#        try:
-#            _ip_addr = ipaddress.ip_address(u"{}".format(ip_string))
-#            return(_ip_addr)
-#        except:
-#            return(False)
+    def add_peer_route(self, _prefix, _intf, _via):
+        """
+        Fuction to add static IPv6 route to peer router
+        Parameters:
+        _prefix = Subnet of Delegated Prefix (string)
+        _intf = Nexthop Interface (string)
+        _via = Nexthop IPv6 Address (string)
+        """
+        route_cmd = "ipv6 route {prefix} {intf} {via}".format(
+            prefix = _prefix,
+            intf = _intf,
+            via = _via
+        )
+        self._to_syslog("DEBUG",route_cmd)
 
 #    def add_kernel_route(self, _host_ip, _host_via):
 #        """
