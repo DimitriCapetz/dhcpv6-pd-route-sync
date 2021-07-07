@@ -40,9 +40,18 @@ This EOS SDK script will mount the state of the Route Table
 import eossdk
 import syslog
 import sys
-import time
-import re
 from jsonrpclib import Server
+
+# Set to allow unverified cert for eAPI call
+import ssl
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    # Legacy Python that doesn't verify HTTPS certificates by default
+    pass
+else:
+    # Handle target environment that doesn't support HTTPS verification
+    ssl._create_default_https_context = _create_unverified_https_context
 
 __author__ = 'robmartin, dcapetz'
 __version__ = '0.1.0'
@@ -93,13 +102,13 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
                     if "/{value}".format(value = value) in _route.route_key().prefix().to_string():
                         try:
                             _route_via = self.get_route_via(_route)
-                            self._to_syslog("DEBUG","GOT VIA")
+                            #self._to_syslog("DEBUG","GOT VIA")
                             _str_prefix = _route.route_key().prefix().to_string()
                             _str_next_hop = _route_via["nexthop"]
                             _str_next_hop_intf = _route_via["intf"]
-                            self._to_syslog("DEBUG",_str_prefix)
-                            self._to_syslog("DEBUG",_str_next_hop_intf)
-                            self._to_syslog("DEBUG",_str_next_hop)
+                            #self._to_syslog("DEBUG",_str_prefix)
+                            #self._to_syslog("DEBUG",_str_next_hop_intf)
+                            #self._to_syslog("DEBUG",_str_next_hop)
                             self.add_peer_route(_str_prefix, _str_next_hop_intf, _str_next_hop)
                         except:
                             self._to_syslog("DEBUG","ERROR")
@@ -170,42 +179,30 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
         return(route_data)
         
 
-#    def on_route_set(self, _fib_route_update):
-#        if _fib_route_update.route_type() == eossdk.ROUTE_TYPE_UNKNOWN:
-#            if self.
-#            _route = _fib_route_update.route_key()
-#            _route_prefix = ipaddress.ip_network(u"{network}".format(
-#                network = _route.prefix().to_string()
-#            ))
-#            for _host in ALL_HOSTS:
-#                _dest_host = ALL_HOSTS[_host]
-#                if _dest_host.full_ip in _route_prefix:
-#                    # Grab information about the route for next-hop
-#                    _fec_id = _fib_route_update.fec_id()
-#                    _tmp_fec = self.fibMgr_.fib_fec(eossdk.FibFecKey(_fec_id))
-#                    _route_via = _tmp_fec.via()
-#                    if len(_route_via) > 0:
-#                        _str_route_via = _route_via[0].hop().to_string()
-#                        if _dest_host.next_hop != _str_route_via:
-#                            self._to_syslog("INFO", "Updated {host} host to {hop} next-hop".format(
-#                                host = str(_dest_host.full_ip),
-#                                hop = _str_route_via
-#                            ))
-#                            # Remove old static Route
-#                            self.remove_kernel_route(str(_dest_host.full_ip), _dest_host.next_hop)
-#                            # Prepare for updated static route
-#                            _dest_host.set_next_hop(_str_route_via)
-#                            _dest_host.set_msg("{network} network via {hop} next-hop".format(
-#                                network = _dest_host.route_network,
-#                                hop = _str_route_via
-#                            ))
-#                            self.agentMgr_.status_set(_host, _dest_host.status_msg)
-#                            ALL_HOSTS[_host] = _dest_host
-#                            self.add_kernel_route(str(_dest_host.full_ip), _str_route_via)
-#                        self._to_syslog("INFO", "Route to {dest} via {hop}".format(
-#                            dest = _fib_route_update.route_key().prefix().to_string(),
-#                            hop = _str_route_via
-#                        ))
+    def on_route_set(self, _fib_route_update):
+        mask = "/{mask}".format(mask = self.agentMgr_.agent_option("pdmask"))
+        if _fib_route_update.route_type() == eossdk.ROUTE_TYPE_UNKNOWN:
+            if mask in _fib_route_update.route_key().prefix().to_string():
+                self._to_syslog("DHCPv6 PD DETECTED","New prefix {prefix} has been delegated".format(
+                    prefix = _fib_route_update.route_key().prefix().to_string()
+                ))
+                try:
+                    _route_via = self.get_route_via(_fib_route_update)
+                    _str_prefix = _fib_route_update.route_key().prefix().to_string()
+                    _str_next_hop = _route_via["nexthop"]
+                    _str_next_hop_intf = _route_via["intf"]
+                    self.add_peer_route(_str_prefix, _str_next_hop_intf, _str_next_hop)
+                except:
+                    self._to_syslog("DEBUG","ERROR")
+
+    def on_route_del(self, _fib_route_update_key):
+        mask = "/{mask}".format(mask = self.agentMgr_.agent_option("pdmask"))
+        if mask in _fib_route_update_key.prefix().to_string():
+            _str_prefix = _fib_route_update_key.prefix().to_string()
+            self._to_syslog("DHCPv6 PD EXPIRED","Potential Delegated prefix {prefix} removed from local FIB. Checking peer...".format(
+                prefix = _str_prefix
+            ))
+            self.remove_peer_route(_str_prefix)
 
     def add_peer_route(self, _prefix, _intf, _via):
         """
@@ -220,84 +217,80 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
             intf = _intf,
             via = _via
         )
-        self._to_syslog("DEBUG",route_cmd)
+        peer = self.agentMgr_.agent_option("peer")
+        self.PASSWORD = remote_password
+        peer_url = "https://admin:{password}@{peer}/command-api".format(
+            password = self.PASSWORD,
+            peer = peer
+        )
+        try:
+            peer_switch = Server(peer_url)
+            config_resp = peer_switch.runCmds(1, [
+                "enable",
+                "configure",
+                route_cmd,
+                "end"
+            ])
+            self._to_syslog("DHCPv6 PD Route ADDED","Configured route for delegated prefix {prefix} to {via} on peer router {peer}".format(
+                prefix = _prefix,
+                via = _via,
+                peer = peer
+            ))
+        except:
+            self._to_syslog("DEBUG","ERROR CONFIGURING PEER")
 
-#    def add_kernel_route(self, _host_ip, _host_via):
-#        """
-#        Function to remove a static route programmed into the kernel
-#        Parameters:
-#        _host_ip = IP Address for the destination (string)
-#        _host_via = IP Route Next Hop (string)
-#        """
-#        add_route = [
-#            "ip",
-#            "route",
-#            "add",
-#            "{host}/32".format(host=_host_ip),
-#            "via",
-#            _host_via,
-#            "mtu",
-#            str(self.MTU)
-#        ]
-#        try:
-#            kernel_route_add = call(add_route, stdout=PIPE, stderr=PIPE)
-#            self._to_syslog("OK", "Added Kernel route for {host} via {hop} with MTU {mtu}".format(
-#                host = _host_ip,
-#                hop = _host_via,
-#                mtu = self.MTU
-#            ))
-#        except:
-#            kernel_route_add = 6
-#            self._to_syslog("ERROR", "Issue adding Kernel route for {host} via {hop} with MTU {mtu}".format(
-#                host = _host_ip,
-#                hop = _host_via,
-#                mtu = self.MTU
-#            ))
-#        return(kernel_route_add)
-#
-#    def remove_kernel_route(self, _host_ip, _host_via):
-#        """
-#        Function to remove a static route programmed into the kernel
-#        Parameters:
-#        _host_ip = IP Address for the destination (string)
-#        _host_via = IP Route Next Hop (string)
-#        """
-#        del_route = [
-#            "ip",
-#            "route",
-#            "delete",
-#            "{host}/32".format(host=_host_ip),
-#            "via",
-#            _host_via
-#        ]
-#        try:
-#            kernel_route_delete = call(del_route, stdout=PIPE, stderr=PIPE)
-#            self._to_syslog("OK", "Removed Kernel route for {host} via {hop}".format(
-#                host = _host_ip,
-#                hop = _host_via
-#            ))
-#        except:
-#            kernel_route_delete = 6
-#            self._to_syslog("ERROR", "Issue removing Kernel route for {host} via {hop}".format(
-#                host = _host_ip,
-#                hop = _host_via
-#            ))
-#        return(kernel_route_delete)
-
-#    def _remove_host(self,rem_device):
-#        #Function to remove the old status and device from list
-#        if ALL_HOSTS:
-#            if rem_device in ALL_HOSTS:
-#                _host = ALL_HOSTS[rem_device]
-#                self.agentMgr_.status_del(rem_device)
-#                # Remove any static route for host
-#                self.remove_kernel_route(str(_host.full_ip), str(_host.next_hop))
-#                try:
-#                    ALL_HOSTS.pop(rem_device)
-#                except:
-#                    self._to_syslog("Option ERROR", "Option {name} not found internally, not removing".format(
-#                        name = rem_device
-#                    ))
+    def remove_peer_route(self, _prefix):
+        """
+        Fuction to remove static IPv6 route to peer router
+        Requires check of current static routes to ensure accuracy
+        Parameters:
+        _prefix = Subnet of Delegated Prefix (string)
+        """
+        route_show_cmd = "show ipv6 route {prefix} static".format(
+            prefix = _prefix
+        )
+        peer = self.agentMgr_.agent_option("peer")
+        self.PASSWORD = remote_password
+        peer_url = "https://admin:{password}@{peer}/command-api".format(
+            password = self.PASSWORD,
+            peer = peer
+        )
+        try:
+            peer_switch = Server(peer_url)
+            show_resp = peer_switch.runCmds(1, [route_show_cmd])
+            if show_resp[0]["routes"]:
+                self._to_syslog("Peer Route Found","Matching static route for {prefix} found on peer {peer}".format(
+                    prefix = _prefix,
+                    peer = peer
+                ))
+                _via = show_resp[0]["routes"][_prefix]["vias"][0]["nexthopAddr"]
+                _intf = show_resp[0]["routes"][_prefix]["vias"][0]["interface"]
+                route_cmd = "no ipv6 route {prefix} {intf} {via}".format(
+                    prefix = _prefix,
+                    intf = _intf,
+                    via = _via
+                )
+                try:
+                    config_resp = peer_switch.runCmds(1,[
+                        "enable",
+                        "configure",
+                        route_cmd,
+                        "end"
+                    ])
+                    self._to_syslog("DHCPv6 PD Route REMOVED","Deleted route for delegated prefix {prefix} to {via} on peer router {peer}".format(
+                        prefix = _prefix,
+                        via = _via,
+                        peer = peer
+                    ))
+                except:
+                    self._to_syslog("DEBUG","ERROR REMOVING ROUTE FROM PEER")
+            else:
+                self._to_syslog("PD ROUTE not found","Matching static route for {prefix} not found on peer {peer}. No action taken.".format(
+                    prefix = _prefix,
+                    peer = peer
+                ))
+        except:
+            self._to_syslog("DEBUG","ERROR CHECKING ROUTE ON PEER")
 
     def _to_syslog(self, sys_type, sys_msg):
         syslog.syslog("%%SDK-DHCPv6PDRouteSync-Log-6-LOG: {type}: {msg}".format(
