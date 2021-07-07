@@ -95,8 +95,8 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
                             _route_via = self.get_route_via(_route)
                             self._to_syslog("DEBUG","GOT VIA")
                             _str_prefix = _route.route_key().prefix().to_string()
-                            _str_next_hop = _route_via.hop().to_string()
-                            _str_next_hop_intf = _route_via.intf().to_string()
+                            _str_next_hop = _route_via["nexthop"]
+                            _str_next_hop_intf = _route_via["intf"]
                             self._to_syslog("DEBUG",_str_prefix)
                             self._to_syslog("DEBUG",_str_next_hop_intf)
                             self._to_syslog("DEBUG",_str_next_hop)
@@ -162,10 +162,12 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
         """
         _fec_id = _ip_route.fec_id()
         _tmp_fec = self.fibMgr_.fib_fec(eossdk.FibFecKey(_fec_id))
-        self._to_syslog("DEBUG",_tmp_fec.to_string())
-        #self._to_syslog("DEBUG",_tmp_fec.via().to_string())
         _route_via = _tmp_fec.via()
-        return(_route_via[0])
+        route_data = {
+            "intf" : _route_via[0].intf().to_string(),
+            "nexthop" : _route_via[0].hop().to_string()
+        }
+        return(route_data)
         
 
 #    def on_route_set(self, _fib_route_update):
