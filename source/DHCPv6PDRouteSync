@@ -30,6 +30,7 @@
 # dhcpv6-pd-route-sync
 #
 #    Written by:
+#       Dimitri Capetz, Arista Networks
 #       Rob Martin, Arista Networks
 #
 
@@ -38,6 +39,7 @@ This EOS SDK script will mount the state of the Route Table
 """
 
 import eossdk
+import json
 import syslog
 import sys
 from jsonrpclib import Server
@@ -59,14 +61,21 @@ __version__ = '0.1.0'
 # Global variables - Credentials for remote switch
 remote_password = "0227DcDc!"
 
-class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
-    def __init__(self, fibMgr, agentMgr):
+class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandler):
+    def __init__(self, fibMgr, agentMgr, VrfMgr, EapiMgr):
         eossdk.AgentHandler.__init__(self,agentMgr)
         eossdk.FibHandler.__init__(self,fibMgr)
+        eossdk.VrfHandler.__init__(self, VrfMgr)
         self.tracer = eossdk.Tracer("DHCPv6PDRouteSync")
         self.fibMgr_ = fibMgr
         self.agentMgr_ = agentMgr
+        self.VrfMgr_ = VrfMgr
+        self.EapiMgr_ = EapiMgr
         self.tracer.trace0("Constructed")
+        # Set Default Values for needed Variables
+        # If no VRF specified, assume default VRF
+        # This is reset on agent option
+        self.VRF = "default"
 
     def on_initialized(self):
         self.tracer.trace0("We are initialized!")
@@ -74,7 +83,9 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
         # Loop through any pre existing configurations to load
         for _option in self.agentMgr_.agent_option_iter():
             self.on_agent_option(_option, self.agentMgr_.agent_option(_option))
-        # ADD TASK TO CHECK PEER ON INITIALIZATION AND PULL IN ALL EXISTING ROUTES
+        # On initial startup, check peer device for any existing DHCP and Static routes
+        # Would allow for recovery from a reboot / failure gracefully
+        _route_check = self.peer_route_check()
 
     def on_agent_option(self,optionName, value):
         """
@@ -84,90 +95,117 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
             key = optionName,
             value = value
         ))
-        # ADD LOGIC CHECKS AND VALIDATION FOR OPTIONS
-        #if optionName.lower() == "pdmask":
-        #    if int(value) not in range(48, 65):
-        #        self._to_syslog("Valid Prefix Delegation Mask Length is from /48 to /64")
-        #        self.agentMgr_.status_set(optionName, "INVALID")
-        #    else:
-        #        self.agentMgr_.status_set(optionName, value)
-        #elif optionName.lower() == 'vrf':
-        #    if value not in "TEST123":
-        #        self._to_syslog("Invalid VRF Selection")
-        #        self.agentMgr_.status_set(optionName, "INVALID")
-        #    else:
-        #        self.agentMgr_.status_set(optionName, value)
-        self.agentMgr_.status_set(optionName, value)
-        if optionName == "pdmask":
+        if optionName == "vrf":
+            # Ensure VRF exists if the option is set
+            if not self.VrfMgr_.exists(value):
+                self._to_syslog("Config Option ERROR","Invalid VRF Selection")
+                self.agentMgr_.status_set(optionName, "INVALID")
+            else:
+                self.agentMgr_.status_set(optionName, value)
+                self.VRF = value
+                self.fibMgr_.register_vrf(value, True)
+        elif optionName == "pdmask":
+            # Ensure Mask setting is in a valid range
+            # Also trigger a re-check of FIB when mask value is changed to ensure it would
+            # react properly if the user changed their PD Mask value in prod
+            if int(value) not in range(48, 65):
+                self._to_syslog("Config Option ERROR", "Valid Prefix Delegation Mask Length is from /48 to /64")
+                self.agentMgr_.status_set(optionName, "INVALID")
+            else:
+                self.agentMgr_.status_set(optionName, value)
             for _route in self.fibMgr_.fib_route_iter():
                 if _route.route_type() == eossdk.ROUTE_TYPE_UNKNOWN:
                     if "/{value}".format(value = value) in _route.route_key().prefix().to_string():
                         try:
                             _route_via = self.get_route_via(_route)
-                            #self._to_syslog("DEBUG","GOT VIA")
                             _str_prefix = _route.route_key().prefix().to_string()
+                            #self._to_syslog("DEBUG",_str_prefix)
                             _str_next_hop = _route_via["nexthop"]
                             _str_next_hop_intf = _route_via["intf"]
-                            #self._to_syslog("DEBUG",_str_prefix)
-                            #self._to_syslog("DEBUG",_str_next_hop_intf)
-                            #self._to_syslog("DEBUG",_str_next_hop)
                             self.add_peer_route(_str_prefix, _str_next_hop_intf, _str_next_hop)
                         except:
                             self._to_syslog("DEBUG","ERROR")
-#        else:
-#        # Catch All for any destinations/hosts
-#            new_host = True
-#            # Called if VRF option is to be removed
-#            if not value:
-#                self._to_syslog("Option REMOVED", "Removing VRF {vrf}".format(
-#                    vrf = value
-#                ))
-#                self.agentMgr_.status_del(optionName)
-#            #Addition/Update of host
-#            else:
-#                _node_ip = self.verify_ip_addr(value)
-#                if optionName in ALL_HOSTS:
-#                    if ALL_HOSTS[optionName].ip != '':
-#                        new_host = False
-#                # Check if IP Address if valid
-#                if _node_ip:
-#                    if new_host:
-#                            self._to_syslog("HOST ADDED", "{node} node added for updates".format(
-#                                node = optionName
-#                            ))
-#                            new_host.set_msg("Initializing Host Route")
-#                            ALL_HOSTS[optionName] = new_host
-#                            self.agentMgr_.status_set(optionName, new_host.status_msg)
-#                    else:
-#                        if optionName in ALL_HOSTS:
-#                            ALL_HOSTS[optionName].full_ip = _node_ip
-#                    route_prefix = self.find_route_prefix(_node_ip)
-#                    if route_prefix:
-#                        _route_via = self.get_route_via(route_prefix)
-#                        _str_next_hop = _route_via.hop().to_string()
-#                        _str_route_prefix = route_prefix.route_key().prefix().to_string()
-#                        self._to_syslog("INFO", "Found {route} route via destination {via}".format(
-#                            route = _str_route_prefix,
-#                            via = _str_next_hop
-#                        ))
-#                        ALL_HOSTS[optionName].set_prefix(_str_route_prefix)
-#                        ALL_HOSTS[optionName].set_next_hop(_str_next_hop)
-#                        ALL_HOSTS[optionName].set_msg("{network} network via {hop} next-hop".format(
-#                            network = _str_route_prefix,
-#                            hop = _str_next_hop
-#                        ))
-#                        self.agentMgr_.status_set(optionName, new_host.status_msg)
-#                        #self.add_kernel_route(str(_node_ip), _str_next_hop)
-#                else:
-#                    self._to_syslog("HOST ERROR", "{node} node does not have a valid IPv4 Address, Provided: {ip}".format(
-#                        node = optionName,
-#                        ip = value
-#                    ))
-        # ADD LOGIC FOR NEW PEER ROUTER OPTION
-    
+        elif optionName == "peer":
+            # No checks on peer value today
+            # Potentially check if reachable in future
+            self.agentMgr_.status_set(optionName, value)
+        else:
+            self._to_syslog("Config Option ERROR", "{name} is not a valid config option".format(name = optionName))
+            self.agentMgr_.status_set(optionName, "INVALID")
+
+    def peer_route_check(self):
+        """
+        Function to check peer for existing PD routes on startup
+        This will take and create all as static routes locally.
+        """
+        peer = self.agentMgr_.agent_option("peer")
+        self.PASSWORD = remote_password
+        peer_url = "https://admin:{password}@{peer}/command-api".format(
+            password = self.PASSWORD,
+            peer = peer
+        )
+        try:
+            route_config_cmds = []
+            peer_switch = Server(peer_url)
+            # Check for Static v6 routes on peer with distance of 240, if they exist, prep local static routes
+            static_show_resp = peer_switch.runCmds(1, ["show ipv6 route vrf {vrf} static".format(vrf = self.VRF)])
+            if static_show_resp[0]["routes"]:
+                for prefix, route_data in static_show_resp[0]["routes"].items():
+                    if route_data["preference"] == 240:
+                        via = route_data["vias"][0]["nexthopAddr"]
+                        intf = route_data["vias"][0]["interface"]
+                        self._to_syslog("Peer Route Found","Static route for {prefix} found on peer {peer}".format(
+                            prefix = prefix,
+                            peer = peer
+                        ))
+                        route_cmd = "ipv6 route vrf {vrf} {prefix} {intf} {via} 240".format(
+                            vrf = self.VRF,
+                            prefix = prefix,
+                            intf = intf,
+                            via = via
+                        )
+                        route_config_cmds.append(route_cmd)
+            # Check for DHCPv6 routes on peer, if they exist, prep local static routes
+            dhcp_show_resp = peer_switch.runCmds(1, ["show ipv6 route vrf {vrf} dhcp".format(vrf = self.VRF)])
+            if dhcp_show_resp[0]["routes"]:
+                for prefix, route_data in dhcp_show_resp[0]["routes"].items():
+                    via = route_data["vias"][0]["nexthopAddr"]
+                    intf = route_data["vias"][0]["interface"]
+                    self._to_syslog("Peer Route Found","DHCP route for {prefix} found on peer {peer}".format(
+                        prefix = prefix,
+                        peer = peer
+                    ))
+                    route_cmd = "ipv6 route vrf {vrf} {prefix} {intf} {via} 240".format(
+                        vrf = self.VRF,
+                        prefix = prefix,
+                        intf = intf,
+                        via = via
+                    )
+                    route_config_cmds.append(route_cmd)
+            # If any routes were found, attempt to apply them as static routes via local eAPI module
+            if route_config_cmds:
+                try:
+                    apply_static_config = self.EapiMgr_.run_config_cmds([z for z in route_config_cmds])
+                    if (apply_static_config.success()):
+                        self._to_syslog("DHCPv6 PD Routes ADDED","Created local static routes for routes found on peer")
+                    else:
+                        self._to_syslog("CONFIG ERROR", "Unable to add static routes")
+                        # provide some details on what error there was with configuration
+                        self._to_syslog("CONFIG ERROR", apply_static_config.error_message())
+                except:
+                    self._to_syslog("DEBUG","ERROR applying configuration via local eAPI interaction module.")
+            else:
+                self._to_syslog("PD ROUTE not found","No Static or DHCP v6 routes found on peer {peer}. No action taken.".format(
+                    peer = peer
+                ))
+        except:
+            self._to_syslog("DEBUG","ERROR CHECKING ROUTES ON PEER")
+
+
     def get_route_via(self, _ip_route):
         """
         Function to get the next hop for a specified route.
+        Returns dictionary of relavent info
         Parameters:
         _ip_route = EosSdk ip_route type
         """
@@ -182,23 +220,66 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
         
 
     def on_route_set(self, _fib_route_update):
-        # Add logic to check if overlapping static route exists and delete
+        """
+        Built-in Fuction to trigger when a remote is added.
+        Will check to see if it matches criteria for a DHCPv6 PD route
+        and if so, then add the static route on peer
+        Parameters:
+        _fib_route_update = FIB Data for new Route (class object)
+        """
         mask = "/{mask}".format(mask = self.agentMgr_.agent_option("pdmask"))
         if _fib_route_update.route_type() == eossdk.ROUTE_TYPE_UNKNOWN:
             if mask in _fib_route_update.route_key().prefix().to_string():
+                _str_prefix = _fib_route_update.route_key().prefix().to_string()
+                # If route type is UNKNOWN and has matching mask length, assume a DHCPv6 Route
                 self._to_syslog("DHCPv6 PD DETECTED","New prefix {prefix} has been delegated".format(
-                    prefix = _fib_route_update.route_key().prefix().to_string()
+                    prefix = _str_prefix
                 ))
                 try:
                     _route_via = self.get_route_via(_fib_route_update)
-                    _str_prefix = _fib_route_update.route_key().prefix().to_string()
                     _str_next_hop = _route_via["nexthop"]
                     _str_next_hop_intf = _route_via["intf"]
                     self.add_peer_route(_str_prefix, _str_next_hop_intf, _str_next_hop)
                 except:
-                    self._to_syslog("DEBUG","ERROR")
+                    self._to_syslog("DEBUG","ERROR GETTING INFO TO CONFIGURE ROUTE ON PEER")
+                # Do a check on local routes to see if overlapping static route exists
+                # These should only exist in two cases
+                # 1. A router was rebooted and ingested the DHCPv6 PD routes from the peer
+                #    as static routes.  When the DHCP renewal occurs, the DHCPv6 route should
+                #    take precedence
+                # 2. The initial DHCP request was received on the peer, but the subsequent
+                #    renewal/request was received locally. Again, the DHCPv6 should take precedence
+                try:
+                    local_config_resp = self.EapiMgr_.run_show_cmd("show running-config")
+                    local_config_dict = json.loads(local_config_resp.responses()[0])
+                    for key in local_config_dict["cmds"].keys():
+                        if _str_prefix in key:
+                            self._to_syslog("Local Route Found","Local static route for {prefix} found. Deleting...".format(
+                                prefix = _str_prefix
+                            ))
+                            route_cmd = "no {route}".format(route = key)
+                            route_config_cmd = [route_cmd]
+                            try:
+                                remove_static_config = self.EapiMgr_.run_config_cmds([z for z in route_config_cmd])
+                                if (remove_static_config.success()):
+                                    self._to_syslog("Static Route REMOVED","Overlapping local static route removed")
+                                else:
+                                    self._to_syslog("CONFIG ERROR", "Unable to remove static route")
+                                    # provide some details on what error there was with configuration
+                                    self._to_syslog("CONFIG ERROR", apply_static_config.error_message())
+                            except:
+                                self._to_syslog("DEBUG","ERROR applying configuration via local eAPI interaction module.")
+                except:
+                    self._to_syslog("DEBUG","ERROR retrieving configuration via local eAPI interaction module.")
 
     def on_route_del(self, _fib_route_update_key):
+        """
+        Built-in Fuction to trigger when a remote is removed.
+        Will check to see if it matches criteria for a DHCPv6 PD route
+        and if so, then remove the static route on peer
+        Parameters:
+        _fib_route_update_key = Prefix data of removed route (class object)
+        """
         mask = "/{mask}".format(mask = self.agentMgr_.agent_option("pdmask"))
         if mask in _fib_route_update_key.prefix().to_string():
             _str_prefix = _fib_route_update_key.prefix().to_string()
@@ -215,7 +296,8 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
         _intf = Nexthop Interface (string)
         _via = Nexthop IPv6 Address (string)
         """
-        route_cmd = "ipv6 route {prefix} {intf} {via} 240".format(
+        route_cmd = "ipv6 route vrf {vrf} {prefix} {intf} {via} 240".format(
+            vrf = self.VRF,
             prefix = _prefix,
             intf = _intf,
             via = _via
@@ -249,7 +331,8 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
         Parameters:
         _prefix = Subnet of Delegated Prefix (string)
         """
-        route_show_cmd = "show ipv6 route {prefix} static".format(
+        route_show_cmd = "show ipv6 route vrf {vrf} {prefix} static".format(
+            vrf = self.VRF,
             prefix = _prefix
         )
         peer = self.agentMgr_.agent_option("peer")
@@ -268,7 +351,8 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
                 ))
                 _via = show_resp[0]["routes"][_prefix]["vias"][0]["nexthopAddr"]
                 _intf = show_resp[0]["routes"][_prefix]["vias"][0]["interface"]
-                route_cmd = "no ipv6 route {prefix} {intf} {via}".format(
+                route_cmd = "no ipv6 route vrf {vrf} {prefix} {intf} {via}".format(
+                    vrf = self.VRF,
                     prefix = _prefix,
                     intf = _intf,
                     via = _via
@@ -306,5 +390,5 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler):
 if __name__ == '__main__':
     syslog.openlog('SDK-DHCPv6PDRouteSync-Log',0,syslog.LOG_LOCAL4)
     sdk = eossdk.Sdk()
-    _ = DHCPV6PDROUTESYNC(sdk.get_fib_mgr(eossdk.MODE_TYPE_READ_NOTIFYING),sdk.get_agent_mgr())
+    _ = DHCPV6PDROUTESYNC(sdk.get_fib_mgr(eossdk.MODE_TYPE_READ_NOTIFYING),sdk.get_agent_mgr(),sdk.get_vrf_mgr(),sdk.get_eapi_mgr())
     sdk.main_loop(sys.argv)
