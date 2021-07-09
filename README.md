@@ -47,6 +47,7 @@ daemon DHCPv6PDRouteSync
    option peer value {peer_ip}
 ```
 **`mask_length` **(REQUIRED)** Specify the mask length of prefix delegations assigned via the DHCPv6 Server as a two digit number*
+
 **`peer_ip` **(REQUIRED)** Specify an IP to configure the peer device. NOTE: Default VRF for management is required today*
 
 2. Optionally, configure a VRF value if Prefix Delegations occur in a non-default VRF:
