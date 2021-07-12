@@ -324,6 +324,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
             show_resp = peer_switch.runCmds(1, [route_show_cmd])
             if show_resp[0]["routes"]:
                 existing_via = show_resp[0]["routes"][_prefix]["vias"][0]["nexthopAddr"]
+                existing_intf = show_resp[0]["routes"][_prefix]["vias"][0]["interface"]
                 if existing_via == _via:
                     self._to_syslog("DHCPv6 PD Exists", "Static route for {prefix} via {via} already exists. No action taken.".format(
                         prefix = _prefix,
@@ -334,7 +335,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
                     route_remove_cmd = "no ipv6 route vrf {vrf} {prefix} {intf} {via} 240".format(
                         vrf = self.VRF,
                         prefix = _prefix,
-                        intf = _intf,
+                        intf = existing_intf,
                         via = existing_via
                     )
                     config_resp = peer_switch.runCmds(1, [
