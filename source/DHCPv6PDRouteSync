@@ -297,6 +297,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
     def add_peer_route(self, _prefix, _intf, _via):
         """
         Fuction to add static IPv6 route to peer router
+        Will check for overlapping route and remove if conflicting
         Parameters:
         _prefix = Subnet of Delegated Prefix (string)
         _intf = Nexthop Interface (string)
@@ -308,6 +309,10 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
             intf = _intf,
             via = _via
         )
+        route_show_cmd = "show ipv6 route vrf {vrf} {prefix} static".format(
+            vrf = self.VRF,
+            prefix = _prefix
+        )
         peer = self.agentMgr_.agent_option("peer")
         self.PASSWORD = remote_password
         peer_url = "https://admin:{password}@{peer}/command-api".format(
@@ -316,18 +321,48 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
         )
         try:
             peer_switch = Server(peer_url)
-            config_resp = peer_switch.runCmds(1, [
-                "enable",
-                "configure",
-                route_cmd,
-                "write",
-                "end"
-            ])
-            self._to_syslog("DHCPv6 PD Route ADDED","Configured route for delegated prefix {prefix} to {via} on peer router {peer}".format(
-                prefix = _prefix,
-                via = _via,
-                peer = peer
-            ))
+            show_resp = peer_switch.runCmds(1, [route_show_cmd])
+            if show_resp[0]["routes"]:
+                existing_via = show_resp[0]["routes"][_prefix]["vias"][0]["nexthopAddr"]
+                if existing_via == _via:
+                    self._to_syslog("DHCPv6 PD Exists", "Static route for {prefix} via {via} already exists. No action taken.".format(
+                        prefix = _prefix,
+                        via = _via
+                    ))
+                else:
+                    self._to_syslog("DHCPv6 PD Route FOUND", "Overlapping DHCPv6 PD Static Route found on peer. Removing...")
+                    route_remove_cmd = "no ipv6 route vrf {vrf} {prefix} {intf} {via} 240".format(
+                        vrf = self.VRF,
+                        prefix = _prefix,
+                        intf = _intf,
+                        via = existing_via
+                    )
+                    config_resp = peer_switch.runCmds(1, [
+                        "enable",
+                        "configure",
+                        route_remove_cmd,
+                        route_cmd,
+                        "write",
+                        "end"
+                    ])
+                    self._to_syslog("DHCPv6 PD Route ADDED","Configured route for delegated prefix {prefix} to {via} on peer router {peer}".format(
+                        prefix = _prefix,
+                        via = _via,
+                        peer = peer
+                    ))
+            else:
+                config_resp = peer_switch.runCmds(1, [
+                    "enable",
+                    "configure",
+                    route_cmd,
+                    "write",
+                    "end"
+                ])
+                self._to_syslog("DHCPv6 PD Route ADDED","Configured route for delegated prefix {prefix} to {via} on peer router {peer}".format(
+                    prefix = _prefix,
+                    via = _via,
+                    peer = peer
+                ))
         except:
             self._to_syslog("DEBUG","ERROR CONFIGURING PEER")
 
