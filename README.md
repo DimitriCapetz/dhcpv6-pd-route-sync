@@ -93,7 +93,7 @@ vrf          IPV6
 After a DHCPv6 PD route has been detected and sychronized to the peer device, it will show in the `show daemon DHCPv6PDRouteSync` output.
 
 ```
-dime-a-tron-720xp(config-daemon-DHCPv6PDRouteSync)#show daemon DHCPv6PDRouteSync
+dime-a-tron-720xp#show daemon DHCPv6PDRouteSync
 Agent: DHCPv6PDRouteSync (running with PID 30709)
 Uptime: 0:00:53 (Start time: Mon Jul 12 11:03:24 2021)
 Configuration:
