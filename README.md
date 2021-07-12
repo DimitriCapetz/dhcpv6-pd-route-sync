@@ -70,7 +70,7 @@ daemon DHCPv6PDRouteSync
 ```
 
 
-#### Sample output of `show daemon DHCPv6PDRouteSync`
+#### Sample outputs of `show daemon DHCPv6PDRouteSync`
 ```
 dime-a-tron-720xp#show daemon DHCPv6PDRouteSync
 Agent: DHCPv6PDRouteSync (running with PID 15208)
@@ -88,4 +88,26 @@ Data         Value
 pdmask       64
 peer         10.112.112.243
 vrf          IPV6
+```
+
+After a DHCPv6 PD route has been detected and sychronized to the peer device, it will show in the `show daemon DHCPv6PDRouteSync` output.
+
+```
+dime-a-tron-720xp(config-daemon-DHCPv6PDRouteSync)#show daemon DHCPv6PDRouteSync
+Agent: DHCPv6PDRouteSync (running with PID 30709)
+Uptime: 0:00:53 (Start time: Mon Jul 12 11:03:24 2021)
+Configuration:
+Option       Value
+------------ --------------
+pdmask       64
+peer         10.112.112.243
+vrf          IPV6
+
+Status:
+Data                   Value
+---------------------- ---------------------------------
+2001:dead:1::/64       Next-hop fe80::20c:29ff:fe99:9df9
+pdmask                 64
+peer                   10.112.112.243
+vrf                    IPV6
 ```

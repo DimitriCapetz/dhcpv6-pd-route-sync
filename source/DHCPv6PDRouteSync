@@ -184,6 +184,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
                     route_config_cmds.append(route_cmd)
             # If any routes were found, attempt to apply them as static routes via local eAPI module
             if route_config_cmds:
+                route_config_cmds.append("write")
                 try:
                     apply_static_config = self.EapiMgr_.run_config_cmds([z for z in route_config_cmds])
                     if (apply_static_config.success()):
@@ -240,6 +241,9 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
                     _str_next_hop = _route_via["nexthop"]
                     _str_next_hop_intf = _route_via["intf"]
                     self.add_peer_route(_str_prefix, _str_next_hop_intf, _str_next_hop)
+                    self.agentMgr_.status_set(_str_prefix, "Next-hop {next_hop}".format(
+                        next_hop = _str_next_hop
+                    ))
                 except:
                     self._to_syslog("DEBUG","ERROR GETTING INFO TO CONFIGURE ROUTE ON PEER")
                 # Do a check on local routes to see if overlapping static route exists
@@ -259,6 +263,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
                             ))
                             route_cmd = "no {route}".format(route = key)
                             route_config_cmd = [route_cmd]
+                            route_config_cmd.append("write")
                             try:
                                 remove_static_config = self.EapiMgr_.run_config_cmds([z for z in route_config_cmd])
                                 if (remove_static_config.success()):
@@ -287,6 +292,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
                 prefix = _str_prefix
             ))
             self.remove_peer_route(_str_prefix)
+            self.agentMgr_.status_del(_str_prefix)
 
     def add_peer_route(self, _prefix, _intf, _via):
         """
@@ -314,6 +320,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
                 "enable",
                 "configure",
                 route_cmd,
+                "write",
                 "end"
             ])
             self._to_syslog("DHCPv6 PD Route ADDED","Configured route for delegated prefix {prefix} to {via} on peer router {peer}".format(
@@ -362,6 +369,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
                         "enable",
                         "configure",
                         route_cmd,
+                        "write",
                         "end"
                     ])
                     self._to_syslog("DHCPv6 PD Route REMOVED","Deleted route for delegated prefix {prefix} to {via} on peer router {peer}".format(
