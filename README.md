@@ -38,6 +38,7 @@ dime-a-tron-720xp#copy installed-extensions boot-extensions
 Copy completed successfully.
 ```
 
+
 ### DHCPv6 PD Route Sync Agent Configuration
 1. In EOS config mode perform the following commands. The options shown here are required:
 ```
@@ -45,10 +46,13 @@ daemon DHCPv6PDRouteSync
    exec /usr/bin/DHCPv6PDRouteSync
    option pdmask value {mask_length}
    option peer value {peer_ip}
+   option file value {config_file}
 ```
 **`mask_length` **(REQUIRED)** Specify the mask length of prefix delegations assigned via the DHCPv6 Server as a two digit number*
 
 **`peer_ip` **(REQUIRED)** Specify an IP to configure the peer device. NOTE: Default VRF for management is required today*
+
+**`config_file` **(REQUIRED)** Specify the location of the config file with the admin password of the peer device for eAPI access*
 
 2. Optionally, configure a VRF value if Prefix Delegations occur in a non-default VRF:
 ```
@@ -57,12 +61,30 @@ daemon DHCPv6PDRouteSync
 ```
 **`vrf_name` **(optional)** Specify a VRF where Prefix Delegations will occur. If none is specified, the default VRF will be used*
 
+3. Create the aforementioned config file in /mnt/flash directory to store the admin password of the remote peer.
+```
+dime-a-tron-720xp#bash
+
+Arista Networks EOS shell
+
+[dcapetz@dime-a-tron-720xp ~]$ vi /mnt/flash/pdConfig.conf
+```
+(Add admin password as a single line using VI)
+```
+:wq
+[dcapetz@dime-a-tron-720xp ~]$ exit
+logout
+dime-a-tron-720xp#
+```
+
+
 ***To see what configurations have been created, enter `show daemon DHCPv6PDRouteSync`*
 
 Example of a full `daemon DHCPv6PDRouteSync` config would look like with all parameters specified
 ```
 daemon DHCPv6PDRouteSync
    exec /usr/bin/DHCPv6PDRouteSync
+   option file value /mnt/flash/pdConfig.conf
    option pdmask value 64
    option peer value 10.112.112.243
    option vrf value IPV6
@@ -78,6 +100,7 @@ Uptime: 0:00:10 (Start time: Thu Jul 08 15:47:23 2021)
 Configuration:
 Option       Value
 ------------ --------------
+file         /mnt/flash/pdConfig.conf
 pdmask       64
 peer         10.112.112.243
 vrf          IPV6
@@ -85,6 +108,7 @@ vrf          IPV6
 Status:
 Data         Value
 ------------ --------------
+file         /mnt/flash/pdConfig.conf
 pdmask       64
 peer         10.112.112.243
 vrf          IPV6
@@ -99,6 +123,7 @@ Uptime: 0:00:53 (Start time: Mon Jul 12 11:03:24 2021)
 Configuration:
 Option       Value
 ------------ --------------
+file         /mnt/flash/pdConfig.conf
 pdmask       64
 peer         10.112.112.243
 vrf          IPV6
@@ -107,6 +132,7 @@ Status:
 Data                   Value
 ---------------------- ---------------------------------
 2001:dead:1::/64       Next-hop fe80::20c:29ff:fe99:9df9
+file                   /mnt/flash/pdConfig.conf
 pdmask                 64
 peer                   10.112.112.243
 vrf                    IPV6

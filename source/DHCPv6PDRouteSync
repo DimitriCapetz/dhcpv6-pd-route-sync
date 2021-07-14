@@ -40,6 +40,8 @@ This EOS SDK script will mount the state of the Route Table
 
 import eossdk
 import json
+import os.path
+import os
 import syslog
 import sys
 from jsonrpclib import Server
@@ -57,9 +59,6 @@ else:
 
 __author__ = 'robmartin, dcapetz'
 __version__ = '0.1.0'
-
-# Global variables - Credentials for remote switch
-remote_password = "0227DcDc!"
 
 class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandler):
     def __init__(self, fibMgr, agentMgr, VrfMgr, EapiMgr):
@@ -129,6 +128,18 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
             # No checks on peer value today
             # Potentially check if reachable in future
             self.agentMgr_.status_set(optionName, value)
+        elif optionName == "file":
+            # Check if file exists
+            # If yes, read file and set password value
+            if not os.path.isfile(value):
+                self._to_syslog("Config Option ERROR", "Configuration File is not valid. Please check path.")
+                self.agentMgr_.status_set(optionName, "INVALID")
+            else:
+                with open(value) as fh:
+                    configfile = fh.readlines()
+                    configfile = [x.strip() for x in configfile]
+                    self.PASSWORD = configfile[0]
+                    self.agentMgr_.status_set(optionName, value)
         else:
             self._to_syslog("Config Option ERROR", "{name} is not a valid config option".format(name = optionName))
             self.agentMgr_.status_set(optionName, "INVALID")
@@ -139,7 +150,6 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
         This will take and create all as static routes locally.
         """
         peer = self.agentMgr_.agent_option("peer")
-        self.PASSWORD = remote_password
         peer_url = "https://admin:{password}@{peer}/command-api".format(
             password = self.PASSWORD,
             peer = peer
@@ -314,7 +324,6 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
             prefix = _prefix
         )
         peer = self.agentMgr_.agent_option("peer")
-        self.PASSWORD = remote_password
         peer_url = "https://admin:{password}@{peer}/command-api".format(
             password = self.PASSWORD,
             peer = peer
@@ -379,7 +388,6 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
             prefix = _prefix
         )
         peer = self.agentMgr_.agent_option("peer")
-        self.PASSWORD = remote_password
         peer_url = "https://admin:{password}@{peer}/command-api".format(
             password = self.PASSWORD,
             peer = peer
