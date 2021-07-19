@@ -114,7 +114,8 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
                 self.agentMgr_.status_set(optionName, value)
             for _route in self.fibMgr_.fib_route_iter():
                 if _route.route_type() == eossdk.ROUTE_TYPE_UNKNOWN:
-                    if "/{value}".format(value = value) in _route.route_key().prefix().to_string():
+                    # Check for matching length prefixes and /128s for DHCP assigned addresses and prefix delegations
+                    if "/{value}".format(value = value) in _route.route_key().prefix().to_string() or "/128" in _route.route_key().prefix().to_string():
                         try:
                             _route_via = self.get_route_via(_route)
                             _str_prefix = _route.route_key().prefix().to_string()
@@ -157,18 +158,21 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
         try:
             route_config_cmds = []
             peer_switch = Server(peer_url)
-            # Check for Static v6 routes on peer with distance of 240, if they exist, prep local static routes
+            # Check for Static v6 routes on peer with distance of 190, if they exist, prep local static routes
+            # ADD CHECK FOR EXISTING DHCPv6 ROUTE ON LOCAL DEVICE
+            #
+            #
             static_show_resp = peer_switch.runCmds(1, ["show ipv6 route vrf {vrf} static".format(vrf = self.VRF)])
             if static_show_resp[0]["routes"]:
                 for prefix, route_data in static_show_resp[0]["routes"].items():
-                    if route_data["preference"] == 240:
+                    if route_data["preference"] == 190:
                         via = route_data["vias"][0]["nexthopAddr"]
                         intf = route_data["vias"][0]["interface"]
                         self._to_syslog("Peer Route Found","Static route for {prefix} found on peer {peer}".format(
                             prefix = prefix,
                             peer = peer
                         ))
-                        route_cmd = "ipv6 route vrf {vrf} {prefix} {intf} {via} 240".format(
+                        route_cmd = "ipv6 route vrf {vrf} {prefix} {intf} {via} 190".format(
                             vrf = self.VRF,
                             prefix = prefix,
                             intf = intf,
@@ -185,7 +189,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
                         prefix = prefix,
                         peer = peer
                     ))
-                    route_cmd = "ipv6 route vrf {vrf} {prefix} {intf} {via} 240".format(
+                    route_cmd = "ipv6 route vrf {vrf} {prefix} {intf} {via} 190".format(
                         vrf = self.VRF,
                         prefix = prefix,
                         intf = intf,
@@ -240,7 +244,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
         """
         mask = "/{mask}".format(mask = self.agentMgr_.agent_option("pdmask"))
         if _fib_route_update.route_type() == eossdk.ROUTE_TYPE_UNKNOWN:
-            if mask in _fib_route_update.route_key().prefix().to_string():
+            if mask in _fib_route_update.route_key().prefix().to_string() or "/128" in _fib_route_update.route_key().prefix().to_string():
                 _str_prefix = _fib_route_update.route_key().prefix().to_string()
                 # If route type is UNKNOWN and has matching mask length, assume a DHCPv6 Route
                 self._to_syslog("DHCPv6 PD DETECTED","New prefix {prefix} has been delegated".format(
@@ -296,7 +300,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
         _fib_route_update_key = Prefix data of removed route (class object)
         """
         mask = "/{mask}".format(mask = self.agentMgr_.agent_option("pdmask"))
-        if mask in _fib_route_update_key.prefix().to_string():
+        if mask in _fib_route_update_key.prefix().to_string() or "/128" in _fib_route_update_key.prefix().to_string():
             _str_prefix = _fib_route_update_key.prefix().to_string()
             self._to_syslog("DHCPv6 PD EXPIRED","Potential Delegated prefix {prefix} removed from local FIB. Checking peer...".format(
                 prefix = _str_prefix
@@ -313,7 +317,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
         _intf = Nexthop Interface (string)
         _via = Nexthop IPv6 Address (string)
         """
-        route_cmd = "ipv6 route vrf {vrf} {prefix} {intf} {via} 240".format(
+        route_cmd = "ipv6 route vrf {vrf} {prefix} {intf} {via} 190".format(
             vrf = self.VRF,
             prefix = _prefix,
             intf = _intf,
@@ -332,7 +336,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
             peer_switch = Server(peer_url)
             show_resp = peer_switch.runCmds(1, [route_show_cmd])
             if show_resp[0]["routes"]:
-                for prefix, data in show_resp[0]["routes"]:
+                for prefix, data in show_resp[0]["routes"].items():
                     if "/{mask}".format(mask = self.agentMgr_.agent_option("pdmask")) in prefix:
                         existing_via = show_resp[0]["routes"][_prefix]["vias"][0]["nexthopAddr"]
                         existing_intf = show_resp[0]["routes"][_prefix]["vias"][0]["interface"]
@@ -343,7 +347,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
                             ))
                         else:
                             self._to_syslog("DHCPv6 PD Route FOUND", "Overlapping DHCPv6 PD Static Route found on peer. Removing...")
-                            route_remove_cmd = "no ipv6 route vrf {vrf} {prefix} {intf} {via} 240".format(
+                            route_remove_cmd = "no ipv6 route vrf {vrf} {prefix} {intf} {via} 190".format(
                                 vrf = self.VRF,
                                 prefix = _prefix,
                                 intf = existing_intf,
