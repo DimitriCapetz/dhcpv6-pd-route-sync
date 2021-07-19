@@ -1,6 +1,6 @@
 Summary: DHCPv6PDRouteSync
 Name: DHCPv6PDRouteSync
-Version: 0.1.0
+Version: 0.1.1
 Release: 1
 License: Arista Networks
 Group: EOS/Extension
