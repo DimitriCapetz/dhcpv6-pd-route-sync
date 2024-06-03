@@ -1,4 +1,4 @@
-FROM python:2.7
+FROM python:3.9
 
 RUN apt update && apt install -y \
     rpm \
@@ -33,18 +33,10 @@ RUN echo "eosdev ALL=(ALL:ALL) NOPASSWD:ALL" >> /etc/sudoers && \
 
 RUN pip install jsonrpclib python2-secrets
 
-COPY .devcontainer/src/eossdk.py /usr/lib/python2.7/
+#COPY .devcontainer/src/eossdk.py /usr/lib/python2.7/
+COPY .devcontainer/src/eossdk.py /usr/lib/python3.9/site-packages/
 
 USER eosdev
 
 ENV name='DHCPv6PDRouteSync'
-
-# Install oh-my-zsh
-
-RUN cd ~/ && wget https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh && sh install.sh --unattended && rm install.sh
-
-# Persist session history
-
-RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=$CONTAINERWS/.history" \
-    && echo $SNIPPET >> "/home/$USERNAME/.zshrc"
 
