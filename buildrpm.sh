@@ -11,7 +11,7 @@ done
 
 APP=$name
 PROJECT='dhcpv6-pd-route-sync'
-DUT='10.99.99.202'
+DUT='10.99.99.2'
 echo "Creating RPM Directories"
 mkdir -p rpmbuild/SOURCES
 mkdir -p rpmbuild/RPM
@@ -40,11 +40,11 @@ echo -n "${APP}-${VERSION}-${RELEASE}.noarch.rpm: " >> manifest.txt
 echo $(sha1sum rpmbuild/RPM/noarch/${APP}-${VERSION}-${RELEASE}.noarch.rpm | awk '{print $1}') >> manifest.txt
 
 echo "Start file transfer and swix create"
-scp /workspaces/${PROJECT}/rpmbuild/RPM/noarch/${APP}-${VERSION}-${RELEASE}.noarch.rpm builder@${DUT}:/mnt/flash/ext-eos/
-scp manifest.txt builder@${DUT}:/mnt/flash/ext-eos/
+scp /workspaces/${PROJECT}/rpmbuild/RPM/noarch/${APP}-${VERSION}-${RELEASE}.noarch.rpm eosdev@${DUT}:/mnt/flash/ext-eos/
+scp manifest.txt eosdev@${DUT}:/mnt/flash/ext-eos/
 
-ssh builder@${DUT} swix create /mnt/flash/ext-eos/swix/${APP}-${VERSION}-${RELEASE}.swix /mnt/flash/ext-eos/${APP}-${VERSION}-${RELEASE}.noarch.rpm
+ssh eosdev@${DUT} swix create /mnt/flash/ext-eos/swix/${APP}-${VERSION}-${RELEASE}.swix /mnt/flash/ext-eos/${APP}-${VERSION}-${RELEASE}.noarch.rpm
 
-scp builder@${DUT}:/mnt/flash/ext-eos/swix/${APP}-${VERSION}-${RELEASE}.swix /workspaces/${PROJECT}/extension/
+scp eosdev@${DUT}:/mnt/flash/ext-eos/swix/${APP}-${VERSION}-${RELEASE}.swix /workspaces/${PROJECT}/extension/
 echo "OK"
 echo "SWIX can be found at: /workspaces/${PROJECT}/extension/${APP}-${VERSION}-${RELEASE}.swix"
