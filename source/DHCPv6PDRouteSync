@@ -56,7 +56,7 @@ except AttributeError:
     pass
 
 __author__ = 'robmartin, dcapetz'
-__version__ = '0.1.4'
+__version__ = '0.1.5'
 
 class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandler):
     def __init__(self, fibMgr, agentMgr, VrfMgr, EapiMgr):
@@ -149,7 +149,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
         This will take and create all as static routes locally.
         """
         peer = self.agentMgr_.agent_option("peer")
-        peer_url = "https://admin:{password}@{peer}/command-api".format(
+        peer_url = "https://arista-script:{password}@{peer}/command-api".format(
             password = self.PASSWORD,
             peer = peer
         )
@@ -326,7 +326,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
             prefix = _prefix
         )
         peer = self.agentMgr_.agent_option("peer")
-        peer_url = "https://admin:{password}@{peer}/command-api".format(
+        peer_url = "https://arista-script:{password}@{peer}/command-api".format(
             password = self.PASSWORD,
             peer = peer
         )
@@ -408,7 +408,7 @@ class DHCPV6PDROUTESYNC(eossdk.AgentHandler, eossdk.FibHandler, eossdk.VrfHandle
             prefix = _prefix
         )
         peer = self.agentMgr_.agent_option("peer")
-        peer_url = "https://admin:{password}@{peer}/command-api".format(
+        peer_url = "https://arista-script:{password}@{peer}/command-api".format(
             password = self.PASSWORD,
             peer = peer
         )
